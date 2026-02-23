@@ -160,15 +160,15 @@
         .status-card {
             background: var(--bg-panel);
             border-radius: 15px;
-            padding: 15px 20px;
+            padding: 12px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             border: 1px solid rgba(255,255,255,0.1);
             backdrop-filter: blur(15px);
         }
-        .label { color: var(--accent-color); font-size: 0.85rem; font-weight: bold; }
-        .value { color: #fff; font-size: 1.6rem; font-family: monospace; font-weight: bold; }
+        .label { color: var(--accent-color); font-size: 0.8rem; font-weight: bold; }
+        .value { color: #fff; font-size: 1.4rem; font-family: monospace; font-weight: bold; }
 
         /* 実機テスト用（右上に配置） */
         #test-controls {
@@ -250,6 +250,11 @@
     </div>
 
     <div id="status-panel">
+        <!-- 追加: 信号認識状態の可視化 -->
+        <div class="status-card">
+            <span class="label">信号認識</span>
+            <span id="recognition-status" class="value" style="color:#666;">未検出</span>
+        </div>
         <div class="status-card">
             <span class="label">車両状態</span>
             <span id="drive-status" class="value" style="color:#ffcc00;">停車</span>
@@ -280,13 +285,12 @@
         accThreshold: 1.2,        // 走行判定しきい値
         accStopThreshold: 0.8,    // 停車判定しきい値（ヒステリシス用）
         stopDelayMs: 1500,        // 停車と判定するまでの待機時間（チャタリング防止）
-        lpfAlpha: 0.1             // ローパスフィルタ係数（小さいほどなめらか、大きいほど敏感）
+        lpfAlpha: 0.1             // ローパスフィルタ係数
     };
 
     let session;
     let audioCtx;
     
-    // 状態管理用変数
     let isMoving = false;
     let smoothedAcc = 0;
     let lastStopTimestamp = 0;
@@ -297,6 +301,7 @@
     const monRed = document.getElementById('mon-red');
     const monBlue = document.getElementById('mon-blue');
     const devStatus = document.getElementById('dev-status');
+    const recognitionLabel = document.getElementById('recognition-status');
 
     async function initAudio() {
         if (!audioCtx) {
@@ -334,6 +339,30 @@
         playTone(1318.51, 0, 0.2); playTone(1046.50, 0.12, 0.5);
     }
 
+    /**
+     * 認識状態をUIに反映する関数
+     * @param {string} state - 'red', 'blue', 'none'
+     */
+    function updateRecognitionState(state) {
+        // HMI表示の切り替え
+        showHMI(state);
+        
+        // 信号モニター（上部LED）の切り替え
+        if (state === 'red') {
+            updateSignalMonitor(true, false);
+            recognitionLabel.innerText = "赤信号";
+            recognitionLabel.style.color = "var(--alert-red)";
+        } else if (state === 'blue') {
+            updateSignalMonitor(false, true);
+            recognitionLabel.innerText = "青信号";
+            recognitionLabel.style.color = "var(--alert-green)";
+        } else {
+            updateSignalMonitor(false, false);
+            recognitionLabel.innerText = "未検出";
+            recognitionLabel.style.color = "#666";
+        }
+    }
+
     function showHMI(type) {
         redHMI.style.display = 'none';
         blueHMI.style.display = 'none';
@@ -355,25 +384,21 @@
 
     const startRed = async () => { 
         await initAudio(); 
-        showHMI('red'); 
-        updateSignalMonitor(true, false); 
+        updateRecognitionState('red');
         playRedBeep(); 
         redInterval = setInterval(playRedBeep, 200); 
     };
     const stopRed = () => { 
         clearInterval(redInterval); 
-        showHMI('standby'); 
-        updateSignalMonitor(false, false); 
+        updateRecognitionState('none');
     };
     const startBlue = async () => { 
         await initAudio(); 
-        showHMI('blue'); 
-        updateSignalMonitor(false, true); 
+        updateRecognitionState('blue');
         playBlueChime(); 
     };
     const stopBlue = () => { 
-        showHMI('standby'); 
-        updateSignalMonitor(false, false); 
+        updateRecognitionState('none');
     };
 
     btnRed.addEventListener('mousedown', startRed); 
@@ -420,31 +445,18 @@
         window.addEventListener('devicemotion', (e) => {
             const acc = e.acceleration;
             if (!acc) return;
-            
-            // 瞬時値の計算
             const instantAcc = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-            
-            // ローパスフィルタ適用（なだらかな表示用）
             smoothedAcc = smoothedAcc * (1 - CONFIG.lpfAlpha) + instantAcc * CONFIG.lpfAlpha;
-            
-            // UI更新
             document.getElementById('acc-status').innerText = smoothedAcc.toFixed(2) + "G";
-            
-            // 状態判定ロジック
             const now = Date.now();
-            
             if (smoothedAcc > CONFIG.accThreshold) {
-                // 走行中
                 isMoving = true;
                 lastStopTimestamp = now; 
             } else if (smoothedAcc < CONFIG.accStopThreshold) {
-                // 一定時間しきい値を下回り続けたら「停車」とする
                 if (now - lastStopTimestamp > CONFIG.stopDelayMs) {
                     isMoving = false;
                 }
             }
-            // 中間（しきい値の間）は現在の状態を維持（ヒステリシス）
-
             const driveLabel = document.getElementById('drive-status');
             driveLabel.innerText = isMoving ? "走行" : "停車";
             driveLabel.style.color = isMoving ? "#00ff66" : "#ffcc00";
@@ -456,6 +468,8 @@
             devStatus.innerText = "SYS: MODEL LOADING...";
             setTimeout(() => {
                 devStatus.innerText = "SYS: ACTIVE (MODEL SIM)";
+                // ここで実際の推論ループを開始する予定
+                // startInferenceLoop(); 
             }, 1500);
         } catch (err) {
             devStatus.innerText = "SYS: MODEL ERROR";
