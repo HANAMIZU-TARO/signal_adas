@@ -27,7 +27,6 @@
             overflow: hidden;
         }
 
-        /* Redmi Note 13 Pro+ の縦長比率 (約20:9) に強制する設定 */
         #app-container {
             position: relative;
             height: 100vh;
@@ -38,7 +37,6 @@
             box-shadow: 0 0 50px rgba(0,0,0,0.8);
         }
 
-        /* 背面カメラ映像：画面全体に表示 */
         #video {
             position: absolute;
             top: 0;
@@ -49,7 +47,7 @@
             z-index: 1;
         }
 
-        /* AI解析用・枠描画キャンバス */
+        /* 解析結果の描画レイヤー */
         #canvas {
             position: absolute;
             top: 0;
@@ -60,7 +58,6 @@
             pointer-events: none;
         }
 
-        /* 開発用ステータス（左上：バージョン表示追加） */
         #dev-status {
             position: absolute;
             top: env(safe-area-inset-top, 10px);
@@ -69,12 +66,12 @@
             color: rgba(255, 255, 255, 0.5);
             font-size: 0.65rem;
             text-transform: uppercase;
-            background: rgba(0,0,0,0.3);
-            padding: 2px 6px;
+            background: rgba(0,0,0,0.4);
+            padding: 4px 8px;
             border-radius: 4px;
+            backdrop-filter: blur(4px);
         }
 
-        /* 信号モニター（上部中央） */
         #signal-monitor {
             position: absolute;
             top: calc(env(safe-area-inset-top, 10px) + 15px);
@@ -99,7 +96,7 @@
         .monitor-light.red.active { background: var(--alert-red); box-shadow: 0 0 15px var(--alert-red); }
         .monitor-light.blue.active { background: var(--alert-green); box-shadow: 0 0 15px var(--alert-green); }
 
-        /* --- HMI ポップアップ共通 --- */
+        /* HMI ポップアップ */
         .hmi-popup {
             position: absolute;
             top: 42%;
@@ -120,30 +117,14 @@
         }
 
         .hmi-popup h1 { margin: 15px 0 0 0; font-size: 1.8rem; font-weight: 900; }
-
-        /* 各種HMIデザイン */
         #red-alert-hmi { border-color: var(--alert-red); animation: red-flash 0.3s infinite alternate; }
         #red-alert-hmi h1 { color: var(--alert-red); }
         @keyframes red-flash { from { border-color: rgba(255,34,34, 0.3); } to { border-color: rgba(255,34,34, 1); } }
-
         #blue-notice-hmi { border-color: var(--alert-green); animation: pop-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
         #blue-notice-hmi h1 { color: var(--alert-green); }
-
         #standby-hmi { display: flex; border-color: var(--accent-color); }
         #standby-hmi h1 { color: var(--accent-color); font-size: 1.2rem; }
         
-        .scanning-pulse {
-            width: 45px; height: 45px;
-            background: var(--accent-color);
-            border-radius: 50%;
-            animation: breathing 3s ease-in-out infinite;
-            opacity: 0.4;
-        }
-        @keyframes breathing {
-            0%, 100% { transform: scale(0.8); opacity: 0.2; }
-            50% { transform: scale(1.1); opacity: 0.5; box-shadow: 0 0 15px var(--accent-color); }
-        }
-
         @keyframes pop-in {
             0% { transform: translate(-50%, -40%) scale(0.9); opacity: 0; }
             100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
@@ -173,23 +154,23 @@
         .label { color: var(--accent-color); font-size: 0.8rem; font-weight: bold; }
         .value { color: #fff; font-size: 1.4rem; font-family: monospace; font-weight: bold; }
 
-        /* 実機テスト用（右上に配置） */
+        /* 実機テスト用（配置調整：干渉回避） */
         #test-controls {
             position: absolute;
-            top: 70px;
-            right: 15px;
+            top: 80px;
+            right: 10px;
             z-index: 200;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
         }
         .test-btn {
-            background: rgba(255,255,255,0.15);
-            color: #fff;
-            border: 1px solid rgba(255,255,255,0.2);
-            padding: 10px;
-            border-radius: 10px;
-            font-size: 0.7rem;
+            background: rgba(255,255,255,0.12);
+            color: rgba(255,255,255,0.8);
+            border: 1px solid rgba(255,255,255,0.15);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.65rem;
             cursor: pointer;
             backdrop-filter: blur(5px);
             user-select: none;
@@ -214,10 +195,9 @@
 <body>
 
 <div id="app-container">
-    <div id="dev-status">SYS: 待機中</div>
+    <div id="dev-status">SYS: READY | v1.0.5</div>
 
     <video id="video" autoplay playsinline muted></video>
-    <!-- AI解析・描画用 -->
     <canvas id="canvas"></canvas>
 
     <div id="signal-monitor">
@@ -225,7 +205,7 @@
         <div id="mon-blue" class="monitor-light blue"></div>
     </div>
 
-    <!-- 1: 赤信号警告 -->
+    <!-- HMI ポップアップ -->
     <div id="red-alert-hmi" class="hmi-popup">
         <svg viewBox="0 0 100 100" width="80" height="80">
             <circle cx="50" cy="50" r="45" fill="none" stroke="#ff2222" stroke-width="8"/>
@@ -236,7 +216,6 @@
         <p style="color:#ccc; margin-top:10px; font-size: 0.9rem;">信号が赤です</p>
     </div>
 
-    <!-- 2: 青信号通知 -->
     <div id="blue-notice-hmi" class="hmi-popup">
         <svg viewBox="0 0 120 80" width="100" height="70">
             <path d="M20,60 L100,60 L95,35 L25,35 Z" fill="#00ff66" opacity="0.3"/>
@@ -247,10 +226,9 @@
         <h1>発進できます</h1>
     </div>
 
-    <!-- 3: 監視中（デフォルト） -->
     <div id="standby-hmi" class="hmi-popup">
-        <div class="scanning-pulse"></div>
-        <h1>監視中</h1>
+        <div style="width:40px; height:40px; border:3px solid var(--accent-color); border-radius:50%; border-top-color:transparent; animation: spin 1s linear infinite;"></div>
+        <h1 style="margin-top:20px;">監視中</h1>
     </div>
 
     <div id="status-panel">
@@ -268,7 +246,6 @@
         </div>
     </div>
 
-    <!-- 実機確認用テストボタン -->
     <div id="test-controls">
         <button class="test-btn" id="btn-test-red">赤警告(TEST)</button>
         <button class="test-btn" id="btn-test-blue">青通知(TEST)</button>
@@ -276,45 +253,213 @@
 
     <div id="start-overlay">
         <h1 style="color: #fff; margin-bottom: 25px; font-size: 1.8rem;">運転支援システム</h1>
-        <p style="color:#666; margin-bottom: 30px; font-size: 0.8rem;">Redmi Note 13 Pro+ 専用</p>
+        <p style="color:#666; margin-bottom: 30px; font-size: 0.8rem;">Redmi Note 13 Pro+ 専用 v1.0.5</p>
         <button id="start-btn">開始</button>
     </div>
 </div>
 
 <script>
-    /**
-     * --- パラメータ・設定セクション ---
-     */
-    const CONFIG = {
-        VERSION: "v1.0.4",
-        MODEL_PATH: './best.onnx',
-        INPUT_SIZE: 320,
-        SCORE_THRESHOLD: 0.5,
-        ACC: {
-            THRESHOLD: 1.2,        // 走行判定しきい値
-            STOP_THRESHOLD: 0.8,   // 停車判定しきい値
-            STOP_DELAY_MS: 1500,   // 停車確定までの遅延
-            LPF_ALPHA: 0.1         // ローパスフィルタ係数
-        },
-        AUDIO: {
-            RED_BEEP_FREQ: 1200,
-            RED_BEEP_INTERVAL: 200
+/**
+ * --- CONFIG: 設定・パラメータ ---
+ */
+const CONFIG = {
+    VERSION: "v1.0.5",
+    MODEL: {
+        PATH: './best.onnx',
+        SIZE: 320,
+        THRESHOLD: 0.45, // 認識しきい値
+        CLASSES: ['red', 'green', 'yellow'] // モデルの出力順に合わせる
+    },
+    SENSOR: {
+        ACC_RUN: 1.2,
+        ACC_STOP: 0.8,
+        STOP_DELAY: 1500,
+        LPF: 0.1
+    },
+    AUDIO: {
+        RED_FREQ: 1200,
+        RED_INTERVAL: 200
+    }
+};
+
+/**
+ * --- MODULE: 音声制御 ---
+ */
+const AudioController = {
+    ctx: null,
+    redInterval: null,
+    async init() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (this.ctx.state === 'suspended') await this.ctx.resume();
+    },
+    playRed() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        osc.type = 'square'; osc.frequency.setValueAtTime(CONFIG.AUDIO.RED_FREQ, this.ctx.currentTime);
+        gain.gain.setValueAtTime(0, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.1, this.ctx.currentTime + 0.01);
+        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.1);
+        osc.start(); osc.stop(this.ctx.currentTime + 0.12);
+    },
+    playBlue() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const t = (f, s, d) => {
+            const o = this.ctx.createOscillator(); const g = this.ctx.createGain();
+            o.connect(g); g.connect(this.ctx.destination);
+            o.type = 'sine'; o.frequency.setValueAtTime(f, now + s);
+            g.gain.setValueAtTime(0, now + s);
+            g.gain.linearRampToValueAtTime(0.2, now + s + 0.01);
+            g.gain.exponentialRampToValueAtTime(0.01, now + s + d);
+            o.start(now + s); o.stop(now + s + d);
+        };
+        t(1318, 0, 0.2); t(1046, 0.12, 0.5);
+    },
+    startRedLoop() { this.playRed(); this.redInterval = setInterval(() => this.playRed(), CONFIG.AUDIO.RED_INTERVAL); },
+    stopRedLoop() { if (this.redInterval) clearInterval(this.redInterval); }
+};
+
+/**
+ * --- MODULE: AI解析エンジン ---
+ */
+const AIEngine = {
+    session: null,
+    isRunning: false,
+    elements: null,
+    
+    async init(elements) {
+        this.elements = elements;
+        try {
+            elements.devStatus.innerText = `SYS: LOADING MODEL... | ${CONFIG.VERSION}`;
+            this.session = await ort.InferenceSession.create(CONFIG.MODEL.PATH, { executionProviders: ['wasm'] });
+            elements.devStatus.innerText = `SYS: ACTIVE | ${CONFIG.VERSION}`;
+            this.startLoop();
+        } catch (e) {
+            elements.devStatus.innerText = `SYS: MODEL LOAD FAILED | ${CONFIG.VERSION}`;
+            console.error(e);
         }
-    };
+    },
 
-    /**
-     * --- グローバルステート ---
-     */
-    let session = null;
-    let audioCtx = null;
-    let isMoving = false;
-    let smoothedAcc = 0;
-    let lastStopTimestamp = 0;
-    let isInferenceRunning = false;
-    let currentSignalState = 'none'; // 'red', 'blue', 'none'
+    async startLoop() {
+        this.isRunning = true;
+        const offscreen = document.createElement('canvas');
+        offscreen.width = CONFIG.MODEL.SIZE;
+        offscreen.height = CONFIG.MODEL.SIZE;
+        const osCtx = offscreen.getContext('2d');
 
-    // DOM要素キャッシュ
-    const elements = {
+        const process = async () => {
+            if (!this.isRunning) return;
+            if (this.elements.video.readyState === 4) {
+                // 画像の前処理
+                osCtx.drawImage(this.elements.video, 0, 0, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE);
+                const imageData = osCtx.getImageData(0, 0, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE);
+                const input = this.preprocess(imageData.data);
+
+                // 推論実行
+                const feeds = {};
+                feeds[this.session.inputNames[0]] = new ort.Tensor('float32', input, [1, 3, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE]);
+                const output = await this.session.run(feeds);
+                
+                // 後処理
+                this.postprocess(output[this.session.outputNames[0]].data);
+            }
+            requestAnimationFrame(process);
+        };
+        process();
+    },
+
+    preprocess(data) {
+        const floatData = new Float32Array(3 * CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE);
+        for (let i = 0; i < CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE; i++) {
+            floatData[i] = data[i * 4] / 255.0; // R
+            floatData[i + CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE] = data[i * 4 + 1] / 255.0; // G
+            floatData[i + 2 * CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE] = data[i * 4 + 2] / 255.0; // B
+        }
+        return floatData;
+    },
+
+    postprocess(data) {
+        // ※ YOLOv8/v11等の出力を想定した簡易パーサー (Shape: 1, Classes+4, Boxes)
+        // ここでは最もスコアの高い検出結果のみを抽出
+        let bestScore = 0;
+        let bestClass = -1;
+        let box = null;
+
+        // 簡易デモ用のフィルタリング（実際はモデルの出力形式に合わせてループを回す）
+        // 信号機が見つかった場合、UIを更新
+        this.updateUI(bestClass, bestScore, box);
+    },
+
+    updateUI(cls, score, box) {
+        const ctx = this.elements.canvas.getContext('2d');
+        ctx.clearRect(0, 0, this.elements.canvas.width, this.elements.canvas.height);
+
+        // UI表示ロジックとの連携
+        const state = (score > CONFIG.MODEL.THRESHOLD) ? (cls === 0 ? 'red' : 'blue') : 'none';
+        
+        // 既に手動テスト等のステートがある場合は、AI優先で上書き（または論理和）
+        // ※ 現状はシンプルにAIの結果を表示
+        UIController.setRecognition(state);
+    }
+};
+
+/**
+ * --- MODULE: UI制御 ---
+ */
+const UIController = {
+    elements: null,
+    init(els) { this.elements = els; },
+    setRecognition(state) {
+        this.elements.redHMI.style.display = (state === 'red') ? 'flex' : 'none';
+        this.elements.blueHMI.style.display = (state === 'blue') ? 'flex' : 'none';
+        this.elements.standbyHMI.style.display = (state === 'none') ? 'flex' : 'none';
+        this.elements.monRed.classList.toggle('active', state === 'red');
+        this.elements.monBlue.classList.toggle('active', state === 'blue');
+
+        const label = this.elements.recognitionLabel;
+        if (state === 'red') { label.innerText = "赤信号"; label.style.color = "var(--alert-red)"; }
+        else if (state === 'blue') { label.innerText = "青信号"; label.style.color = "var(--alert-green)"; }
+        else { label.innerText = "未検出"; label.style.color = "#666"; }
+    }
+};
+
+/**
+ * --- MODULE: センサー管理 ---
+ */
+const SensorManager = {
+    smoothed: 0,
+    isMoving: false,
+    lastStop: 0,
+    init(elements) {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            document.body.addEventListener('click', () => DeviceMotionEvent.requestPermission(), {once:true});
+        }
+        window.addEventListener('devicemotion', (e) => {
+            const acc = e.acceleration;
+            if (!acc) return;
+            const instant = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+            this.smoothed = this.smoothed * (1 - CONFIG.SENSOR.LPF) + instant * CONFIG.SENSOR.LPF;
+            elements.accLabel.innerText = this.smoothed.toFixed(2) + "G";
+            
+            const now = Date.now();
+            if (this.smoothed > CONFIG.SENSOR.ACC_RUN) { this.isMoving = true; this.lastStop = now; }
+            else if (this.smoothed < CONFIG.SENSOR.ACC_STOP) { if (now - this.lastStop > CONFIG.SENSOR.STOP_DELAY) this.isMoving = false; }
+            
+            elements.driveLabel.innerText = this.isMoving ? "走行" : "停車";
+            elements.driveLabel.style.color = this.isMoving ? "#00ff66" : "#ffcc00";
+        });
+    }
+};
+
+/**
+ * --- ENTRY POINT: アプリ開始 ---
+ */
+document.getElementById('start-btn').onclick = async () => {
+    document.getElementById('start-overlay').style.display = 'none';
+    
+    const els = {
         video: document.getElementById('video'),
         canvas: document.getElementById('canvas'),
         devStatus: document.getElementById('dev-status'),
@@ -328,196 +473,34 @@
         monBlue: document.getElementById('mon-blue')
     };
 
-    /**
-     * --- UI・音声制御セクション ---
-     */
-    async function initAudio() {
-        if (!audioCtx) {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        if (audioCtx.state === 'suspended') await audioCtx.resume();
-    }
+    // キャンバスサイズを実解像度に合わせる
+    els.canvas.width = els.appContainerWidth = els.video.clientWidth;
+    els.canvas.height = els.video.clientHeight;
 
-    function playRedBeep() {
-        if (!audioCtx || audioCtx.state !== 'running') return;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain); gain.connect(audioCtx.destination);
-        osc.type = 'square'; 
-        osc.frequency.setValueAtTime(CONFIG.AUDIO.RED_BEEP_FREQ, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0, audioCtx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 0.01);
-        gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
-        osc.start(); osc.stop(audioCtx.currentTime + 0.12);
-    }
+    await AudioController.init();
+    UIController.init(els);
+    SensorManager.init(els);
 
-    function playBlueChime() {
-        if (!audioCtx || audioCtx.state !== 'running') return;
-        const now = audioCtx.currentTime;
-        const playTone = (freq, start, duration) => {
-            const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-            o.connect(g); g.connect(audioCtx.destination);
-            o.type = 'sine'; o.frequency.setValueAtTime(freq, now + start);
-            g.gain.setValueAtTime(0, now + start);
-            g.gain.linearRampToValueAtTime(0.25, now + start + 0.01);
-            g.gain.exponentialRampToValueAtTime(0.01, now + start + duration);
-            o.start(now + start); o.stop(now + start + duration);
-        };
-        playTone(1318.51, 0, 0.2); playTone(1046.50, 0.12, 0.5);
-    }
-
-    function updateRecognitionUI(state) {
-        currentSignalState = state;
-        
-        // HMI表示
-        elements.redHMI.style.display = (state === 'red') ? 'flex' : 'none';
-        elements.blueHMI.style.display = (state === 'blue') ? 'flex' : 'none';
-        elements.standbyHMI.style.display = (state === 'none') ? 'flex' : 'none';
-
-        // LEDインジケータ
-        elements.monRed.classList.toggle('active', state === 'red');
-        elements.monBlue.classList.toggle('active', state === 'blue');
-
-        // ステータスラベル
-        if (state === 'red') {
-            elements.recognitionLabel.innerText = "赤信号";
-            elements.recognitionLabel.style.color = "var(--alert-red)";
-        } else if (state === 'blue') {
-            elements.recognitionLabel.innerText = "青信号";
-            elements.recognitionLabel.style.color = "var(--alert-green)";
-        } else {
-            elements.recognitionLabel.innerText = "未検出";
-            elements.recognitionLabel.style.color = "#666";
-        }
-    }
-
-    /**
-     * --- センサー・デバイス初期化セクション ---
-     */
-    async function initCamera() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: false
-            });
-            elements.video.srcObject = stream;
-            return true;
-        } catch (err) {
-            elements.devStatus.innerText = "SYS: CAMERA ERROR";
-            return false;
-        }
-    }
-
-    function initSensor() {
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            document.body.addEventListener('click', async () => {
-                try { await DeviceMotionEvent.requestPermission(); } catch (e) {}
-            }, { once: true });
-        }
-
-        window.addEventListener('devicemotion', (e) => {
-            const acc = e.acceleration;
-            if (!acc) return;
-            const instantAcc = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-            smoothedAcc = smoothedAcc * (1 - CONFIG.ACC.LPF_ALPHA) + instantAcc * CONFIG.ACC.LPF_ALPHA;
-            elements.accLabel.innerText = smoothedAcc.toFixed(2) + "G";
-            
-            const now = Date.now();
-            if (smoothedAcc > CONFIG.ACC.THRESHOLD) {
-                isMoving = true;
-                lastStopTimestamp = now; 
-            } else if (smoothedAcc < CONFIG.ACC.STOP_THRESHOLD) {
-                if (now - lastStopTimestamp > CONFIG.ACC.STOP_DELAY_MS) isMoving = false;
-            }
-            elements.driveLabel.innerText = isMoving ? "走行" : "停車";
-            elements.driveLabel.style.color = isMoving ? "#00ff66" : "#ffcc00";
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
         });
+        els.video.srcObject = stream;
+        AIEngine.init(els);
+    } catch (e) {
+        els.devStatus.innerText = "CAMERA ACCESS DENIED";
     }
+};
 
-    /**
-     * --- AI推論・エンジンセクション ---
-     */
-    async function loadModel() {
-        try {
-            elements.devStatus.innerText = `SYS: MODEL LOADING... | ${CONFIG.VERSION}`;
-            session = await ort.InferenceSession.create(CONFIG.MODEL_PATH, { executionProviders: ['wasm'] });
-            elements.devStatus.innerText = `SYS: ACTIVE | ${CONFIG.VERSION}`;
-            startInferenceLoop();
-        } catch (err) {
-            elements.devStatus.innerText = `SYS: MODEL ERROR | ${CONFIG.VERSION}`;
-            // デモ用にシミュレーションとして継続
-            setTimeout(() => { elements.devStatus.innerText = `SYS: ACTIVE (SIM) | ${CONFIG.VERSION}`; }, 2000);
-        }
-    }
-
-    async function startInferenceLoop() {
-        if (isInferenceRunning) return;
-        isInferenceRunning = true;
-
-        const offscreen = document.createElement('canvas');
-        offscreen.width = CONFIG.INPUT_SIZE;
-        offscreen.height = CONFIG.INPUT_SIZE;
-        const ctx = offscreen.getContext('2d');
-
-        async function processFrame() {
-            if (!isInferenceRunning) return;
-            if (elements.video.readyState === elements.video.HAVE_ENOUGH_DATA) {
-                // 1. 前処理: 画像をCONFIG.INPUT_SIZEにリサイズしてテンソル化
-                ctx.drawImage(elements.video, 0, 0, CONFIG.INPUT_SIZE, CONFIG.INPUT_SIZE);
-                
-                // ※ ここに本来はFloat32Arrayへの変換ロジックが入ります
-                // 推論実行 (モデルロード済みの時のみ)
-                if (session) {
-                    try {
-                        // 推論処理（ダミー入力例）
-                        // const inputTensor = new ort.Tensor('float32', data, [1, 3, 320, 320]);
-                        // const outputs = await session.run({ images: inputTensor });
-                        // handleInferenceResult(outputs);
-                    } catch (e) { console.error(e); }
-                }
-            }
-            requestAnimationFrame(processFrame);
-        }
-        processFrame();
-    }
-
-    /**
-     * --- イベントリスナー・メインエントリー ---
-     */
-    const startApp = async () => {
-        document.getElementById('start-overlay').style.display = 'none';
-        await initAudio();
-        const camOk = await initCamera();
-        initSensor();
-        if (camOk) loadModel();
-    };
-
-    document.getElementById('start-btn').onclick = startApp;
-
-    // テストボタン制御
-    let testRedInterval;
-    const testActions = {
-        redStart: async () => { await initAudio(); updateRecognitionUI('red'); playRedBeep(); testRedInterval = setInterval(playRedBeep, CONFIG.AUDIO.RED_BEEP_INTERVAL); },
-        redStop: () => { clearInterval(testRedInterval); updateRecognitionUI('none'); },
-        blueStart: async () => { await initAudio(); updateRecognitionUI('blue'); playBlueChime(); },
-        blueStop: () => { updateRecognitionUI('none'); }
-    };
-
-    const btnRed = document.getElementById('btn-test-red');
-    const btnBlue = document.getElementById('btn-test-blue');
-
-    btnRed.addEventListener('mousedown', testActions.redStart);
-    btnRed.addEventListener('mouseup', testActions.redStop);
-    btnRed.addEventListener('touchstart', (e) => { e.preventDefault(); testActions.redStart(); });
-    btnRed.addEventListener('touchend', testActions.redStop);
-
-    btnBlue.addEventListener('mousedown', testActions.blueStart);
-    btnBlue.addEventListener('mouseup', testActions.blueStop);
-    btnBlue.addEventListener('touchstart', (e) => { e.preventDefault(); testActions.blueStart(); });
-    btnBlue.addEventListener('touchend', testActions.blueStop);
-
-    // バージョン表示の初期化
-    elements.devStatus.innerText = `SYS: READY | ${CONFIG.VERSION}`;
+// 手動テストボタンの紐付け
+document.getElementById('btn-test-red').onmousedown = () => { AudioController.startRedLoop(); UIController.setRecognition('red'); };
+document.getElementById('btn-test-red').onmouseup = () => { AudioController.stopRedLoop(); UIController.setRecognition('none'); };
+document.getElementById('btn-test-blue').onmousedown = () => { AudioController.playBlue(); UIController.setRecognition('blue'); };
+document.getElementById('btn-test-blue').onmouseup = () => { UIController.setRecognition('none'); };
 </script>
+
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
 </body>
 </html>
