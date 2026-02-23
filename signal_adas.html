@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>信号支援システム - 縦型 HMI</title>
+    <!-- ONNX Runtime Web -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+        :root {
+            --accent-color: #00e5ff;
+            --alert-green: #00ff66;
+            --alert-red: #ff2222;
+            --bg-panel: rgba(15, 20, 25, 0.9);
+            --bg-hmi: rgba(0, 0, 0, 0.85);
+        }
+
+        body {
+            margin: 0;
+            background: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+            font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+            overflow: hidden;
+        }
+
+        /* Redmi Note 13 Pro+ の縦長比率 (約20:9) に強制する設定 
+           PCブラウザで見ても縦長に見えるように調整
+        */
+        #app-container {
+            position: relative;
+            height: 100vh;
+            /* 画面が横に広い時は縦長の比率を維持、スマホの時は100% */
+            aspect-ratio: 9 / 20; 
+            max-width: 100vw;
+            background: #000;
+            overflow: hidden;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+        }
+
+        /* 背面カメラ映像：画面全体に表示 */
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        /* AI解析用・枠描画キャンバス */
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* 開発用ステータス（左上：目立たない） */
+        #dev-status {
+            position: absolute;
+            top: env(safe-area-inset-top, 10px);
+            left: 10px;
+            z-index: 200;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.6rem;
+            text-transform: uppercase;
+        }
+
+        /* 信号モニター（上部中央） */
+        #signal-monitor {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 10px) + 15px);
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 25px;
+            border-radius: 30px;
+            z-index: 150;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(5px);
+        }
+        .monitor-light {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #222;
+            transition: background 0.15s;
+        }
+        .monitor-light.red.active { background: var(--alert-red); box-shadow: 0 0 15px var(--alert-red); }
+        .monitor-light.blue.active { background: var(--alert-green); box-shadow: 0 0 15px var(--alert-green); }
+
+        /* --- HMI ポップアップ共通 --- */
+        .hmi-popup {
+            position: absolute;
+            top: 42%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            background: var(--bg-hmi);
+            border: 2px solid #444;
+            border-radius: 35px;
+            padding: 35px 15px;
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            pointer-events: none;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.8);
+        }
+
+        .hmi-popup h1 { margin: 15px 0 0 0; font-size: 1.8rem; font-weight: 900; }
+
+        /* 各種HMIデザイン */
+        #red-alert-hmi { border-color: var(--alert-red); animation: red-flash 0.3s infinite alternate; }
+        #red-alert-hmi h1 { color: var(--alert-red); }
+        @keyframes red-flash { from { border-color: rgba(255,34,34, 0.3); } to { border-color: rgba(255,34,34, 1); } }
+
+        #blue-notice-hmi { border-color: var(--alert-green); animation: pop-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        #blue-notice-hmi h1 { color: var(--alert-green); }
+
+        #standby-hmi { display: flex; border-color: var(--accent-color); }
+        #standby-hmi h1 { color: var(--accent-color); font-size: 1.2rem; }
+        
+        .scanning-pulse {
+            width: 45px; height: 45px;
+            background: var(--accent-color);
+            border-radius: 50%;
+            animation: breathing 3s ease-in-out infinite;
+            opacity: 0.4;
+        }
+        @keyframes breathing {
+            0%, 100% { transform: scale(0.8); opacity: 0.2; }
+            50% { transform: scale(1.1); opacity: 0.5; box-shadow: 0 0 15px var(--accent-color); }
+        }
+
+        @keyframes pop-in {
+            0% { transform: translate(-50%, -40%) scale(0.9); opacity: 0; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+
+        /* 下部メインパネル */
+        #status-panel {
+            position: absolute;
+            bottom: calc(env(safe-area-inset-bottom, 10px) + 30px);
+            left: 5%;
+            width: 90%;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .status-card {
+            background: var(--bg-panel);
+            border-radius: 15px;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(15px);
+        }
+        .label { color: var(--accent-color); font-size: 0.85rem; font-weight: bold; }
+        .value { color: #fff; font-size: 1.6rem; font-family: monospace; font-weight: bold; }
+
+        /* 実機テスト用（右上に配置） */
+        #test-controls {
+            position: absolute;
+            top: 70px;
+            right: 15px;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .test-btn {
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            backdrop-filter: blur(5px);
+        }
+
+        /* スタート画面 */
+        #start-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 300;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            padding: 20px; text-align: center;
+        }
+        #start-btn {
+            background: var(--accent-color); color: #000; border: none;
+            padding: 20px 50px; font-size: 1.8rem; font-weight: bold;
+            border-radius: 60px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <div id="dev-status">SYS: 待機中</div>
+
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="signal-monitor">
+        <div id="mon-red" class="monitor-light red"></div>
+        <div id="mon-blue" class="monitor-light blue"></div>
+    </div>
+
+    <!-- 1: 赤信号警告 -->
+    <div id="red-alert-hmi" class="hmi-popup">
+        <svg viewBox="0 0 100 100" width="80" height="80">
+            <circle cx="50" cy="50" r="45" fill="none" stroke="#ff2222" stroke-width="8"/>
+            <line x1="30" y1="30" x2="70" y2="70" stroke="#ff2222" stroke-width="12"/>
+            <line x1="70" y1="30" x2="30" y2="70" stroke="#ff2222" stroke-width="12"/>
+        </svg>
+        <h1>止まれ！！</h1>
+        <p style="color:#ccc; margin-top:10px; font-size: 0.9rem;">信号が赤です</p>
+    </div>
+
+    <!-- 2: 青信号通知 -->
+    <div id="blue-notice-hmi" class="hmi-popup">
+        <svg viewBox="0 0 120 80" width="100" height="70">
+            <path d="M20,60 L100,60 L95,35 L25,35 Z" fill="#00ff66" opacity="0.3"/>
+            <rect x="30" y="45" width="60" height="15" rx="5" fill="#00ff66"/>
+            <path d="M40,35 L80,35 L75,20 L45,20 Z" fill="#00ff66"/>
+            <path d="M100,40 L130,45 L100,50 Z" fill="#00ff66" transform="translate(-10,0)"/>
+        </svg>
+        <h1>発進できます</h1>
+    </div>
+
+    <!-- 3: 監視中（デフォルト） -->
+    <div id="standby-hmi" class="hmi-popup">
+        <div class="scanning-pulse"></div>
+        <h1>監視中</h1>
+    </div>
+
+    <div id="status-panel">
+        <div class="status-card">
+            <span class="label">車両状態</span>
+            <span id="drive-status" class="value" style="color:#ffcc00;">停車</span>
+        </div>
+        <div class="status-card">
+            <span class="label">加速度</span>
+            <span id="acc-status" class="value">0.00G</span>
+        </div>
+    </div>
+
+    <!-- 実機確認用テストボタン -->
+    <div id="test-controls">
+        <button class="test-btn" id="btn-test-red">赤警告(TEST)</button>
+        <button class="test-btn" id="btn-test-blue">青通知(TEST)</button>
+    </div>
+
+    <div id="start-overlay">
+        <h1 style="color: #fff; margin-bottom: 25px; font-size: 1.8rem;">運転支援システム</h1>
+        <p style="color:#666; margin-bottom: 30px; font-size: 0.8rem;">Redmi Note 13 Pro+ 専用</p>
+        <button id="start-btn">開始</button>
+    </div>
+</div>
+
+<script>
+    const CONFIG = {
+        modelPath: './best.onnx',
+        inputSize: 320,
+        accThreshold: 1.3
+    };
+
+    let session;
+    let audioCtx;
+    let isMoving = false;
+    const redHMI = document.getElementById('red-alert-hmi');
+    const blueHMI = document.getElementById('blue-notice-hmi');
+    const standbyHMI = document.getElementById('standby-hmi');
+    const monRed = document.getElementById('mon-red');
+    const monBlue = document.getElementById('mon-blue');
+    const devStatus = document.getElementById('dev-status');
+
+    async function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+        }
+    }
+
+    function playRedBeep() {
+        if (!audioCtx || audioCtx.state !== 'running') return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.type = 'square'; osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.12, audioCtx.currentTime + 0.01);
+        gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.12);
+    }
+
+    function playBlueChime() {
+        if (!audioCtx || audioCtx.state !== 'running') return;
+        const now = audioCtx.currentTime;
+        const playTone = (freq, start, duration) => {
+            const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+            o.connect(g); g.connect(audioCtx.destination);
+            o.type = 'sine'; o.frequency.setValueAtTime(freq, now + start);
+            g.gain.setValueAtTime(0, now + start);
+            g.gain.linearRampToValueAtTime(0.25, now + start + 0.01);
+            g.gain.exponentialRampToValueAtTime(0.01, now + start + duration);
+            o.start(now + start); o.stop(now + start + duration);
+        };
+        playTone(1318.51, 0, 0.2); playTone(1046.50, 0.12, 0.5);
+    }
+
+    function showHMI(type) {
+        redHMI.style.display = 'none';
+        blueHMI.style.display = 'none';
+        standbyHMI.style.display = 'none';
+        if (type === 'red') redHMI.style.display = 'flex';
+        else if (type === 'blue') blueHMI.style.display = 'flex';
+        else standbyHMI.style.display = 'flex';
+    }
+
+    function updateSignalMonitor(red, blue) {
+        if (red) monRed.classList.add('active'); else monRed.classList.remove('active');
+        if (blue) monBlue.classList.add('active'); else monBlue.classList.remove('active');
+    }
+
+    // --- テスト用ロジック ---
+    let redInterval;
+    const btnRed = document.getElementById('btn-test-red');
+    const btnBlue = document.getElementById('btn-test-blue');
+
+    const startRed = async () => { await initAudio(); showHMI('red'); updateSignalMonitor(true, false); playRedBeep(); redInterval = setInterval(playRedBeep, 200); };
+    const stopRed = () => { clearInterval(redInterval); showHMI('standby'); updateSignalMonitor(false, false); };
+    const startBlue = async () => { await initAudio(); showHMI('blue'); updateSignalMonitor(false, true); playBlueChime(); };
+    const stopBlue = () => { showHMI('standby'); updateSignalMonitor(false, false); };
+
+    btnRed.addEventListener('mousedown', startRed); btnRed.addEventListener('mouseup', stopRed);
+    btnRed.addEventListener('touchstart', (e) => { e.preventDefault(); startRed(); }); btnRed.addEventListener('touchend', stopRed);
+    btnBlue.addEventListener('mousedown', startBlue); btnBlue.addEventListener('mouseup', stopBlue);
+    btnBlue.addEventListener('touchstart', (e) => { e.preventDefault(); startBlue(); }); btnBlue.addEventListener('touchend', stopBlue);
+
+    // --- メイン起動 ---
+    document.getElementById('start-btn').onclick = () => {
+        document.getElementById('start-overlay').style.display = 'none';
+        initAudio();
+        initCamera();
+        initSensor();
+        loadModel();
+    };
+
+    async function initCamera() {
+        try {
+            const video = document.getElementById('video');
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false
+            });
+            video.srcObject = stream;
+        } catch (err) {
+            devStatus.innerText = "SYS: CAMERA ERROR";
+        }
+    }
+
+    function initSensor() {
+        window.addEventListener('devicemotion', (e) => {
+            const acc = e.acceleration;
+            if (!acc) return;
+            const total = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+            document.getElementById('acc-status').innerText = total.toFixed(2) + "G";
+            isMoving = total > CONFIG.accThreshold;
+            const driveLabel = document.getElementById('drive-status');
+            driveLabel.innerText = isMoving ? "走行" : "停車";
+            driveLabel.style.color = isMoving ? "#00ff66" : "#ffcc00";
+        });
+    }
+
+    async function loadModel() {
+        try {
+            devStatus.innerText = "SYS: MODEL LOADING...";
+            session = await ort.InferenceSession.create(CONFIG.modelPath, { executionProviders: ['wasm'] });
+            devStatus.innerText = "SYS: ACTIVE";
+        } catch (err) {
+            devStatus.innerText = "SYS: MODEL ERROR";
+        }
+    }
+</script>
+</body>
+</html>
