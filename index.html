@@ -2,585 +2,423 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>信号支援システム - 縦型 HMI</title>
-    <!-- ONNX Runtime Web -->
-    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>DriveMate AI</title>
+    
+    <!-- PWA & Mobile Optimization -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="DriveMate">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0f172a">
+
+    <!-- Google Fonts 導入によるスマートなタイポグラフィ -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <style>
         :root {
-            --accent-color: #00e5ff;
-            --alert-green: #00ff66;
-            --alert-red: #ff2222;
-            --bg-panel: rgba(15, 20, 25, 0.9);
-            --bg-hmi: rgba(0, 0, 0, 0.85);
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
         }
 
-        body {
+        body { 
+            background-color: #000;
+            color: white; 
+            overflow: hidden; 
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
             margin: 0;
-            background: #111;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             height: 100vh;
             width: 100vw;
-            font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
-            overflow: hidden;
         }
 
-        #app-container {
-            position: relative;
-            height: 100vh;
-            aspect-ratio: 9 / 20; 
-            max-width: 100vw;
-            background: #000;
-            overflow: hidden;
-            box-shadow: 0 0 50px rgba(0,0,0,0.8);
-        }
-
-        #video {
-            position: absolute;
-            top: 0;
-            left: 0;
+        /* アプリコンテナ */
+        .app-container {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background-color: #0f172a;
+            overflow: hidden;
+        }
+
+        /* PCプレビュー用枠線 */
+        @media (min-width: 640px) {
+            .app-container {
+                width: 393px;
+                height: 852px;
+                max-height: 92vh;
+                border-radius: 3.5rem;
+                border: 10px solid #1e293b;
+                box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.7);
+                margin: auto;
+            }
+        }
+
+        #map { 
+            height: 100%; 
+            width: 100%; 
+            filter: grayscale(0.5) invert(0.9) hue-rotate(180deg) brightness(0.7);
             z-index: 1;
         }
 
-        /* 解析結果の描画レイヤー */
-        #canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 2;
-            pointer-events: none;
-        }
-
-        #dev-status {
-            position: absolute;
-            top: env(safe-area-inset-top, 10px);
-            left: 10px;
-            z-index: 200;
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            background: rgba(0,0,0,0.4);
-            padding: 4px 8px;
-            border-radius: 4px;
-            backdrop-filter: blur(4px);
-        }
-
-        #signal-monitor {
-            position: absolute;
-            top: calc(env(safe-area-inset-top, 10px) + 15px);
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 15px;
-            background: rgba(0,0,0,0.5);
-            padding: 8px 25px;
-            border-radius: 30px;
-            z-index: 150;
+        /* 3Dグラスモーフィズム */
+        .status-card { 
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.95) 100%); 
+            backdrop-filter: blur(20px); 
+            -webkit-backdrop-filter: blur(20px);
             border: 1px solid rgba(255,255,255,0.1);
-            backdrop-filter: blur(5px);
-        }
-        .monitor-light {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #222;
-            transition: background 0.15s;
-        }
-        .monitor-light.red.active { background: var(--alert-red); box-shadow: 0 0 15px var(--alert-red); }
-        .monitor-light.blue.active { background: var(--alert-green); box-shadow: 0 0 15px var(--alert-green); }
-
-        /* HMI ポップアップ */
-        .hmi-popup {
-            position: absolute;
-            top: 42%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 85%;
-            background: var(--bg-hmi);
-            border: 2px solid #444;
-            border-radius: 35px;
-            padding: 35px 15px;
-            z-index: 100;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-            pointer-events: none;
-            box-shadow: 0 15px 50px rgba(0,0,0,0.8);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.05);
         }
 
-        .hmi-popup h1 { margin: 15px 0 0 0; font-size: 1.8rem; font-weight: 900; }
-        #red-alert-hmi { border-color: var(--alert-red); animation: red-flash 0.3s infinite alternate; }
-        #red-alert-hmi h1 { color: var(--alert-red); }
-        @keyframes red-flash { from { border-color: rgba(255,34,34, 0.3); } to { border-color: rgba(255,34,34, 1); } }
-        #blue-notice-hmi { border-color: var(--alert-green); animation: pop-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        #blue-notice-hmi h1 { color: var(--alert-green); }
-        #standby-hmi { display: flex; border-color: var(--accent-color); }
-        #standby-hmi h1 { color: var(--accent-color); font-size: 1.2rem; }
-        
-        @keyframes pop-in {
-            0% { transform: translate(-50%, -40%) scale(0.9); opacity: 0; }
-            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        .g-circle { 
+            width: 80px; height: 80px; 
+            border-radius: 50%; position: relative; 
+            background: radial-gradient(circle at 50% 100%, #0f172a, #1e293b);
+            box-shadow: inset 0 6px 15px rgba(0,0,0,0.8), 0 1px 2px rgba(255,255,255,0.05);
+            border: 1px solid #334155;
         }
 
-        /* 下部メインパネル */
-        #status-panel {
-            position: absolute;
-            bottom: calc(env(safe-area-inset-bottom, 10px) + 80px);
-            left: 5%;
-            width: 90%;
-            z-index: 50;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        .status-card {
-            background: var(--bg-panel);
-            border-radius: 15px;
-            padding: 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border: 1px solid rgba(255,255,255,0.1);
-            backdrop-filter: blur(15px);
-        }
-        .label { color: var(--accent-color); font-size: 0.8rem; font-weight: bold; }
-        .value { color: #fff; font-size: 1.4rem; font-family: monospace; font-weight: bold; }
-
-        /* 実機テスト用（配置調整：干渉回避） */
-        #test-controls {
-            position: absolute;
-            top: 80px;
-            right: 10px;
-            z-index: 200;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .test-btn {
-            background: rgba(255,255,255,0.12);
-            color: rgba(255,255,255,0.8);
-            border: 1px solid rgba(255,255,255,0.15);
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 0.65rem;
-            cursor: pointer;
-            backdrop-filter: blur(5px);
-            user-select: none;
+        .g-ball { 
+            width: 14px; height: 14px; 
+            border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            background: radial-gradient(circle at 30% 30%, #34d399, #059669); 
+            box-shadow: 0 0 15px rgba(52, 211, 153, 0.6), inset -2px -2px 4px rgba(0,0,0,0.4);
+            transition: transform 0.1s cubic-bezier(0.1, 0.5, 0.1, 1);
         }
 
-        /* スタート画面 */
-        #start-overlay {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: #000; z-index: 300;
-            display: flex; flex-direction: column; justify-content: center; align-items: center;
-            padding: 20px; text-align: center;
+        /* アプリ通知風ポップアップ */
+        #popup { 
+            transform: translate(-50%, -150%); 
+            opacity: 0; 
+            transition: all 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28); 
+            z-index: 5000;
         }
-        #start-btn {
-            background: var(--accent-color); color: #000; border: none;
-            padding: 20px 50px; font-size: 1.8rem; font-weight: bold;
-            border-radius: 60px;
-            cursor: pointer;
+        #popup.show { transform: translate(-50%, calc(20px + var(--safe-top))); opacity: 1; }
+
+        .btn-3d {
+            background: linear-gradient(to bottom, #2563eb, #1d4ed8);
+            border-bottom: 5px solid #1e3a8a;
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+            transition: all 0.1s;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+        }
+        .btn-3d:active {
+            transform: translateY(3px);
+            border-bottom-width: 2px;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+        }
+        .btn-3d:disabled {
+            background: #1e293b;
+            border-bottom-width: 2px;
+            box-shadow: none;
+            transform: translateY(3px);
+            color: #64748b;
+        }
+
+        .bottom-sheet {
+            padding-bottom: calc(1.5rem + var(--safe-bottom));
+            padding-top: 1.5rem;
+            box-shadow: 0 -25px 50px rgba(0,0,0,0.8);
+            z-index: 10;
         }
     </style>
 </head>
-<body>
+<body class="flex items-center justify-center">
 
-<div id="app-container">
-    <div id="dev-status">SYS: READY | v1.0.6</div>
-
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas"></canvas>
-
-    <div id="signal-monitor">
-        <div id="mon-red" class="monitor-light red"></div>
-        <div id="mon-blue" class="monitor-light blue"></div>
-    </div>
-
-    <!-- HMI ポップアップ -->
-    <div id="red-alert-hmi" class="hmi-popup">
-        <svg viewBox="0 0 100 100" width="80" height="80">
-            <circle cx="50" cy="50" r="45" fill="none" stroke="#ff2222" stroke-width="8"/>
-            <line x1="30" y1="30" x2="70" y2="70" stroke="#ff2222" stroke-width="12"/>
-            <line x1="70" y1="30" x2="30" y2="70" stroke="#ff2222" stroke-width="12"/>
-        </svg>
-        <h1>止まれ！！</h1>
-        <p style="color:#ccc; margin-top:10px; font-size: 0.9rem;">信号が赤です</p>
-    </div>
-
-    <div id="blue-notice-hmi" class="hmi-popup">
-        <svg viewBox="0 0 120 80" width="100" height="70">
-            <path d="M20,60 L100,60 L95,35 L25,35 Z" fill="#00ff66" opacity="0.3"/>
-            <rect x="30" y="45" width="60" height="15" rx="5" fill="#00ff66"/>
-            <path d="M40,35 L80,35 L75,20 L45,20 Z" fill="#00ff66"/>
-            <path d="M100,40 L130,45 L100,50 Z" fill="#00ff66" transform="translate(-10,0)"/>
-        </svg>
-        <h1>発進できます</h1>
-    </div>
-
-    <div id="standby-hmi" class="hmi-popup">
-        <div style="width:40px; height:40px; border:3px solid var(--accent-color); border-radius:50%; border-top-color:transparent; animation: spin 1s linear infinite;"></div>
-        <h1 style="margin-top:20px;">監視中</h1>
-    </div>
-
-    <div id="status-panel">
-        <div class="status-card">
-            <span class="label">信号認識</span>
-            <span id="recognition-status" class="value" style="color:#666;">未検出</span>
-        </div>
-        <div class="status-card">
-            <span class="label">車両状態</span>
-            <span id="drive-status" class="value" style="color:#ffcc00;">停車</span>
-        </div>
-        <div class="status-card">
-            <span class="label">加速度</span>
-            <span id="acc-status" class="value">0.00G</span>
-        </div>
-    </div>
-
-    <div id="test-controls">
-        <button class="test-btn" id="btn-test-red">赤警告(TEST)</button>
-        <button class="test-btn" id="btn-test-blue">青通知(TEST)</button>
-    </div>
-
-    <div id="start-overlay">
-        <h1 style="color: #fff; margin-bottom: 25px; font-size: 1.8rem;">運転支援システム</h1>
-        <p style="color:#666; margin-bottom: 30px; font-size: 0.8rem;">Redmi Note 13 Pro+ 専用 v1.0.6</p>
-        <button id="start-btn">開始</button>
-    </div>
-</div>
-
-<script>
-/**
- * --- CONFIG: 設定・パラメータ ---
- */
-const CONFIG = {
-    VERSION: "v1.0.6",
-    MODEL: {
-        PATH: './best.onnx',
-        SIZE: 320,
-        THRESHOLD: 0.40, // 認識しきい値（少し下げて検出しやすくしています）
-        CLASSES: ['red', 'green', 'yellow'] // モデルの出力順に合わせる（0:赤, 1:青, 2:黄 を想定）
-    },
-    SENSOR: {
-        ACC_RUN: 1.2,
-        ACC_STOP: 0.8,
-        STOP_DELAY: 1500,
-        LPF: 0.1
-    },
-    AUDIO: {
-        RED_FREQ: 1200,
-        RED_INTERVAL: 200
-    }
-};
-
-/**
- * --- MODULE: 音声制御 ---
- */
-const AudioController = {
-    ctx: null,
-    redInterval: null,
-    async init() {
-        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        if (this.ctx.state === 'suspended') await this.ctx.resume();
-    },
-    playRed() {
-        if (!this.ctx) return;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.connect(gain); gain.connect(this.ctx.destination);
-        osc.type = 'square'; osc.frequency.setValueAtTime(CONFIG.AUDIO.RED_FREQ, this.ctx.currentTime);
-        gain.gain.setValueAtTime(0, this.ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.1, this.ctx.currentTime + 0.01);
-        gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.1);
-        osc.start(); osc.stop(this.ctx.currentTime + 0.12);
-    },
-    playBlue() {
-        if (!this.ctx) return;
-        const now = this.ctx.currentTime;
-        const t = (f, s, d) => {
-            const o = this.ctx.createOscillator(); const g = this.ctx.createGain();
-            o.connect(g); g.connect(this.ctx.destination);
-            o.type = 'sine'; o.frequency.setValueAtTime(f, now + s);
-            g.gain.setValueAtTime(0, now + s);
-            g.gain.linearRampToValueAtTime(0.2, now + s + 0.01);
-            g.gain.exponentialRampToValueAtTime(0.01, now + s + d);
-            o.start(now + s); o.stop(now + s + d);
-        };
-        t(1318, 0, 0.2); t(1046, 0.12, 0.5);
-    },
-    startRedLoop() { this.playRed(); this.redInterval = setInterval(() => this.playRed(), CONFIG.AUDIO.RED_INTERVAL); },
-    stopRedLoop() { if (this.redInterval) clearInterval(this.redInterval); }
-};
-
-/**
- * --- MODULE: AI解析エンジン ---
- */
-const AIEngine = {
-    session: null,
-    isRunning: false,
-    elements: null,
-    
-    async init(elements) {
-        this.elements = elements;
-        try {
-            elements.devStatus.innerText = `SYS: LOADING MODEL... | ${CONFIG.VERSION}`;
-            this.session = await ort.InferenceSession.create(CONFIG.MODEL.PATH, { executionProviders: ['wasm'] });
-            elements.devStatus.innerText = `SYS: ACTIVE | ${CONFIG.VERSION}`;
-            this.startLoop();
-        } catch (e) {
-            elements.devStatus.innerText = `SYS: MODEL LOAD FAILED | ${CONFIG.VERSION}`;
-            console.error("ONNX Load Error:", e);
-        }
-    },
-
-    async startLoop() {
-        this.isRunning = true;
-        const offscreen = document.createElement('canvas');
-        offscreen.width = CONFIG.MODEL.SIZE;
-        offscreen.height = CONFIG.MODEL.SIZE;
-        const osCtx = offscreen.getContext('2d');
-
-        const process = async () => {
-            if (!this.isRunning) return;
-            if (this.elements.video.readyState === 4) {
-                // 画像の前処理
-                osCtx.drawImage(this.elements.video, 0, 0, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE);
-                const imageData = osCtx.getImageData(0, 0, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE);
-                const input = this.preprocess(imageData.data);
-
-                // 推論実行
-                if (this.session) {
-                    try {
-                        const feeds = {};
-                        feeds[this.session.inputNames[0]] = new ort.Tensor('float32', input, [1, 3, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE]);
-                        const output = await this.session.run(feeds);
-                        
-                        // 後処理
-                        const outputTensor = output[this.session.outputNames[0]];
-                        this.postprocess(outputTensor.data, outputTensor.dims);
-                    } catch (e) {
-                        console.error("Inference Error:", e);
-                    }
-                }
-            }
-            requestAnimationFrame(process);
-        };
-        process();
-    },
-
-    preprocess(data) {
-        const floatData = new Float32Array(3 * CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE);
-        for (let i = 0; i < CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE; i++) {
-            floatData[i] = data[i * 4] / 255.0; // R
-            floatData[i + CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE] = data[i * 4 + 1] / 255.0; // G
-            floatData[i + 2 * CONFIG.MODEL.SIZE * CONFIG.MODEL.SIZE] = data[i * 4 + 2] / 255.0; // B
-        }
-        return floatData;
-    },
-
-    postprocess(data, dims) {
-        let bestScore = 0;
-        let bestClass = -1;
-        let bestBox = null;
-
-        // 一般的なYOLOv8の出力Shapeを想定 (例: [1, 4 + classes, anchors] -> [1, 7, 8400])
-        if (dims && dims.length === 3) {
-            const numRows = dims[1];
-            const numCols = dims[2];
-
-            // 転置されている場合 (例: [1, 8400, 7]) の吸収
-            const isTransposed = numRows > numCols;
-            const anchors = isTransposed ? numRows : numCols;
-            const attributes = isTransposed ? numCols : numRows;
-
-            for (let i = 0; i < anchors; i++) {
-                let maxClassScore = 0;
-                let classId = -1;
-
-                // クラススコアを探す（インデックス4以降がクラス確率）
-                for (let c = 4; c < attributes; c++) {
-                    const score = isTransposed ? data[i * attributes + c] : data[c * anchors + i];
-                    if (score > maxClassScore) {
-                        maxClassScore = score;
-                        classId = c - 4; // 0:赤, 1:青 など
-                    }
-                }
-
-                // しきい値を超え、かつこれまでで最高のスコアだった場合
-                if (maxClassScore > CONFIG.MODEL.THRESHOLD && maxClassScore > bestScore) {
-                    bestScore = maxClassScore;
-                    bestClass = classId;
-                    
-                    // バウンディングボックスの座標 (cx, cy, w, h)
-                    const cx = isTransposed ? data[i * attributes + 0] : data[0 * anchors + i];
-                    const cy = isTransposed ? data[i * attributes + 1] : data[1 * anchors + i];
-                    const w  = isTransposed ? data[i * attributes + 2] : data[2 * anchors + i];
-                    const h  = isTransposed ? data[i * attributes + 3] : data[3 * anchors + i];
-                    
-                    bestBox = { cx, cy, w, h };
-                }
-            }
-        }
-
-        this.updateUI(bestClass, bestScore, bestBox);
-    },
-
-    updateUI(cls, score, box) {
-        const ctx = this.elements.canvas.getContext('2d');
-        // 前回の描画をクリア
-        ctx.clearRect(0, 0, this.elements.canvas.width, this.elements.canvas.height);
-
-        // クラス番号に応じた状態判定（0:赤, 1:青 と仮定。それ以外や閾値以下はnone）
-        const state = (score > CONFIG.MODEL.THRESHOLD) ? (cls === 0 ? 'red' : (cls === 1 ? 'blue' : 'none')) : 'none';
+    <div class="app-container">
         
-        // デバッグ用：バウンディングボックスの描画
-        if (box && state !== 'none') {
-            // モデルの解像度(320x320)から実際の画面のキャンバス解像度へスケールを合わせる
-            const scaleX = this.elements.canvas.width / CONFIG.MODEL.SIZE;
-            const scaleY = this.elements.canvas.height / CONFIG.MODEL.SIZE;
+        <!-- ヘッダー -->
+        <header class="absolute top-0 w-full z-[2000] bg-gradient-to-b from-slate-950/90 to-transparent flex items-center justify-between px-6 pt-[var(--safe-top)] h-[calc(70px+var(--safe-top))] pointer-events-none">
+            <div class="flex items-center gap-3">
+                <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]"></div>
+                <div class="flex flex-col">
+                    <span class="font-black text-[13px] tracking-widest text-white/90">DriveMate<span class="text-emerald-400">.AI</span></span>
+                    <span class="text-[8px] text-slate-400 font-bold tracking-[0.3em]">安全運転解析システム</span>
+                </div>
+            </div>
+            <div id="gps-status" class="text-[9px] text-emerald-400 font-bold tracking-wider bg-emerald-950/40 px-3 py-1.5 rounded-full border border-emerald-500/30 backdrop-blur-sm">GPS捕捉済</div>
+        </header>
+
+        <!-- マップ表示エリア -->
+        <div class="flex-1 w-full relative">
+            <div id="map"></div>
+        </div>
+
+        <!-- アシスタント通知（ポップアップ） -->
+        <div id="popup" class="absolute left-1/2 -translate-x-1/2 w-[92%] max-w-[400px]">
+            <div class="status-card p-4 rounded-[2.5rem] flex items-center gap-4 border border-white/20">
+                <div id="popup-icon" class="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center border border-white/10 flex-shrink-0 shadow-inner"></div>
+                <div class="flex-1">
+                    <div id="popup-category" class="text-[10px] font-black text-slate-400 tracking-widest mb-0.5">運転アドバイス</div>
+                    <div id="popup-msg" class="text-[14px] font-bold text-white leading-snug tracking-tight"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ボトムパネル（計器類とボタン） -->
+        <div class="bottom-sheet bg-slate-900/98 backdrop-blur-3xl rounded-t-[3.5rem] -mt-12 relative px-6 space-y-6 border-t border-white/10">
             
-            // cx, cy(中心座標) から左上の(x, y)座標を計算
-            const x = (box.cx - box.w / 2) * scaleX;
-            const y = (box.cy - box.h / 2) * scaleY;
-            const width = box.w * scaleX;
-            const height = box.h * scaleY;
-            
-            // 色の設定
-            const boxColor = (state === 'red') ? '#ff2222' : '#00ff66';
-            
-            ctx.strokeStyle = boxColor;
-            ctx.lineWidth = 4;
-            ctx.strokeRect(x, y, width, height);
-            
-            // スコアとテキストの描画
-            ctx.fillStyle = boxColor;
-            ctx.font = 'bold 20px sans-serif';
-            ctx.shadowColor = "rgba(0,0,0,0.8)";
-            ctx.shadowBlur = 4;
-            const labelText = `${state === 'red' ? '赤信号' : '青信号'} ${(score * 100).toFixed(1)}%`;
-            ctx.fillText(labelText, x, y - 10);
-            
-            // シャドウリセット
-            ctx.shadowBlur = 0;
+            <div class="w-16 h-1.5 bg-slate-700/40 rounded-full mx-auto -mt-3 mb-4"></div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <!-- 速度メーター -->
+                <div class="status-card h-36 rounded-[2.5rem] flex flex-col items-center justify-center relative overflow-hidden">
+                    <div class="flex flex-col items-center mb-1">
+                        <span class="text-[12px] text-slate-300 font-bold tracking-widest">現在速度</span>
+                        <span class="text-[8px] text-slate-500 font-black tracking-[0.2em] uppercase">Speed</span>
+                    </div>
+                    <div class="flex items-baseline gap-1 relative z-10">
+                        <span id="speed-val" class="text-6xl font-black text-white tabular-nums tracking-tighter">0</span>
+                        <span class="text-[11px] text-slate-400 font-bold">km/h</span>
+                    </div>
+                </div>
+
+                <!-- Gメーター -->
+                <div class="status-card h-36 rounded-[2.5rem] flex flex-col items-center justify-center relative">
+                    <div class="flex flex-col items-center mb-2">
+                        <span class="text-[12px] text-slate-300 font-bold tracking-widest">Gセンサー</span>
+                        <span class="text-[8px] text-slate-500 font-black tracking-[0.2em] uppercase">G-Force</span>
+                    </div>
+                    <div class="g-circle">
+                        <div id="g-ball" class="g-ball"></div>
+                        <div class="absolute inset-0 flex items-center justify-center pointer-events-none text-[8px] text-slate-500 font-bold opacity-80">
+                            <span class="absolute top-0.5">加速</span>
+                            <span class="absolute bottom-0.5">減速</span>
+                            <span class="absolute left-1">左</span>
+                            <span class="absolute right-1">右</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- アシスタントメッセージ -->
+            <div class="flex items-center gap-4 bg-slate-800/40 p-4 rounded-[2rem] border border-slate-700 shadow-inner">
+                <div class="relative flex-shrink-0">
+                    <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center shadow-[0_0_15px_rgba(37,99,235,0.3)] border border-blue-400/30">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-white" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" />
+                        </svg>
+                    </div>
+                    <div class="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 border-[3px] border-slate-900 rounded-full shadow-lg animate-pulse"></div>
+                </div>
+                <div class="flex-1">
+                    <p id="instructor-hint" class="text-[13px] text-slate-200 font-medium leading-relaxed tracking-tight">
+                        教習準備が整いました。<br>「計測を開始」をタップしてください。
+                    </p>
+                </div>
+            </div>
+
+            <!-- メインアクション（不要な補正ボタンを削除し、全幅の大きなボタンに変更） -->
+            <div class="pt-1">
+                <button id="start-btn" class="w-full btn-3d text-white font-bold py-4 rounded-[2rem] text-[15px] tracking-widest flex flex-col items-center justify-center transition-all">
+                    <span>計測を開始</span>
+                    <span class="text-[9px] font-black text-blue-200 uppercase tracking-[0.3em] mt-0.5 opacity-80">Start Session</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let map, marker, preferredVoice = null;
+        let isDriving = false;
+        let lastSpeakTime = 0;
+        let speedLimit = 50; 
+
+        const ADVICE = {
+            SUDDEN_BRAKE: { msg: "ブレーキが少し強めでしたね。もう少し余裕を持って踏み始めましょう。", type: "warning" },
+            SUDDEN_START: { msg: "急発進ですよ。アクセルは優しく、ゆっくり踏み込んでみてください。", type: "warning" },
+            SUDDEN_TURN: { msg: "ハンドル操作が少し急です。もっと滑らかに回すよう意識しましょう。", type: "warning" },
+            OVERSPEED: { msg: "スピードが出すぎていますね。法定速度を守って安全に走りましょう。", type: "danger" },
+            START: { msg: "お待たせしました。それでは、安全に気をつけて出発しましょう。", type: "info" }
+        };
+
+        window.onload = () => {
+            initMap();
+            initVoice();
+        };
+
+        function initVoice() {
+            const voices = window.speechSynthesis.getVoices();
+            preferredVoice = voices.find(v => v.lang === 'ja-JP' && v.name.includes('Google')) 
+                          || voices.find(v => v.lang === 'ja-JP' && (v.name.includes('Kyoko') || v.name.includes('Otoya')))
+                          || voices.find(v => v.lang.includes('ja'));
+        }
+        
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = initVoice;
         }
 
-        // HMI UIの更新
-        UIController.setRecognition(state);
-    }
-};
-
-/**
- * --- MODULE: UI制御 ---
- */
-const UIController = {
-    elements: null,
-    init(els) { this.elements = els; },
-    setRecognition(state) {
-        this.elements.redHMI.style.display = (state === 'red') ? 'flex' : 'none';
-        this.elements.blueHMI.style.display = (state === 'blue') ? 'flex' : 'none';
-        this.elements.standbyHMI.style.display = (state === 'none') ? 'flex' : 'none';
-        this.elements.monRed.classList.toggle('active', state === 'red');
-        this.elements.monBlue.classList.toggle('active', state === 'blue');
-
-        const label = this.elements.recognitionLabel;
-        if (state === 'red') { label.innerText = "赤信号"; label.style.color = "var(--alert-red)"; }
-        else if (state === 'blue') { label.innerText = "青信号"; label.style.color = "var(--alert-green)"; }
-        else { label.innerText = "未検出"; label.style.color = "#666"; }
-    }
-};
-
-/**
- * --- MODULE: センサー管理 ---
- */
-const SensorManager = {
-    smoothed: 0,
-    isMoving: false,
-    lastStop: 0,
-    init(elements) {
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            document.body.addEventListener('click', () => DeviceMotionEvent.requestPermission(), {once:true});
+        function initMap() {
+            try {
+                map = L.map('map', { 
+                    zoomControl: false, 
+                    attributionControl: false
+                }).setView([35.6812, 139.7671], 17);
+                
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                
+                const customIcon = L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="width:20px; height:20px; background:#3b82f6; border:3px solid white; border-radius:50%; box-shadow:0 0 10px rgba(0,0,0,0.5);"></div>`,
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                });
+                
+                marker = L.marker([35.6812, 139.7671], { icon: customIcon }).addTo(map);
+            } catch (error) {
+                console.error("Map initialization failed:", error);
+            }
         }
-        window.addEventListener('devicemotion', (e) => {
-            const acc = e.acceleration;
-            if (!acc) return;
-            const instant = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-            this.smoothed = this.smoothed * (1 - CONFIG.SENSOR.LPF) + instant * CONFIG.SENSOR.LPF;
-            elements.accLabel.innerText = this.smoothed.toFixed(2) + "G";
-            
+
+        // iOSなどで音声を許可させるための初期化処理
+        function unlockAudio() {
+            const uttr = new SpeechSynthesisUtterance('');
+            uttr.volume = 0;
+            window.speechSynthesis.speak(uttr);
+        }
+
+        function speak(text) {
             const now = Date.now();
-            if (this.smoothed > CONFIG.SENSOR.ACC_RUN) { this.isMoving = true; this.lastStop = now; }
-            else if (this.smoothed < CONFIG.SENSOR.ACC_STOP) { if (now - this.lastStop > CONFIG.SENSOR.STOP_DELAY) this.isMoving = false; }
+            if (now - lastSpeakTime < 5000) return; 
             
-            elements.driveLabel.innerText = this.isMoving ? "走行" : "停車";
-            elements.driveLabel.style.color = this.isMoving ? "#00ff66" : "#ffcc00";
+            const uttr = new SpeechSynthesisUtterance(text);
+            uttr.lang = 'ja-JP';
+            uttr.rate = 1.0; 
+            uttr.pitch = 1.05; 
+            if (preferredVoice) uttr.voice = preferredVoice;
+            
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(uttr);
+            lastSpeakTime = now;
+        }
+
+        function showPopup(adviceObj) {
+            const popup = document.getElementById('popup');
+            const msgEl = document.getElementById('popup-msg');
+            const catEl = document.getElementById('popup-category');
+            const iconContainer = document.getElementById('popup-icon');
+
+            let iconSvg = '', colorClass = '';
+            if (adviceObj.type === 'danger') {
+                iconSvg = `<svg class="w-7 h-7 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"/></svg>`;
+                colorClass = 'text-red-500';
+            } else if (adviceObj.type === 'warning') {
+                iconSvg = `<svg class="w-7 h-7 text-amber-500" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 11H9v-2h2v2zm0-4H9V5h2v4z"/></svg>`;
+                colorClass = 'text-amber-500';
+            } else {
+                iconSvg = `<svg class="w-7 h-7 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"/></svg>`;
+                colorClass = 'text-blue-500';
+            }
+
+            iconContainer.innerHTML = iconSvg;
+            msgEl.innerText = adviceObj.msg;
+            catEl.innerText = adviceObj.type === 'info' ? '運転アドバイス' : '安全警告';
+            catEl.className = `text-[10px] font-black tracking-widest mb-1 ${colorClass}`;
+            
+            popup.classList.add('show');
+            speak(adviceObj.msg);
+            setTimeout(() => popup.classList.remove('show'), 4500);
+        }
+
+        document.getElementById('start-btn').addEventListener('click', async () => {
+            try {
+                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    if (permission !== 'granted') {
+                        document.getElementById('instructor-hint').innerHTML = "センサーが許可されていません。<br>設定を確認してください。";
+                        return;
+                    }
+                }
+                
+                if(!preferredVoice) initVoice();
+                unlockAudio();
+                
+                isDriving = true;
+                const btn = document.getElementById('start-btn');
+                btn.innerHTML = `<span>計測中</span><span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] mt-0.5">Active</span>`;
+                btn.disabled = true;
+                
+                document.getElementById('instructor-hint').innerHTML = "走行解析を開始しました。<br><span class='text-emerald-400 font-bold'>安全運転でお願いいたします。</span>";
+                
+                showPopup(ADVICE.START);
+                startTracking();
+                startMotion();
+            } catch (e) {
+                console.error("Permission error:", e);
+                document.getElementById('instructor-hint').innerText = "エラーが発生しました。設定を確認してください。";
+            }
         });
-    }
-};
 
-/**
- * --- ENTRY POINT: アプリ開始 ---
- */
-document.getElementById('start-btn').onclick = async () => {
-    document.getElementById('start-overlay').style.display = 'none';
-    
-    const els = {
-        video: document.getElementById('video'),
-        canvas: document.getElementById('canvas'),
-        devStatus: document.getElementById('dev-status'),
-        driveLabel: document.getElementById('drive-status'),
-        accLabel: document.getElementById('acc-status'),
-        recognitionLabel: document.getElementById('recognition-status'),
-        redHMI: document.getElementById('red-alert-hmi'),
-        blueHMI: document.getElementById('blue-notice-hmi'),
-        standbyHMI: document.getElementById('standby-hmi'),
-        monRed: document.getElementById('mon-red'),
-        monBlue: document.getElementById('mon-blue')
-    };
+        function startTracking() {
+            if (!navigator.geolocation) return;
+            
+            navigator.geolocation.watchPosition((pos) => {
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+                const speed = Math.round((pos.coords.speed || 0) * 3.6); 
+                
+                document.getElementById('speed-val').innerText = speed;
+                if(map && marker) {
+                    map.panTo([lat, lng]);
+                    marker.setLatLng([lat, lng]);
+                }
+                
+                document.getElementById('gps-status').innerText = "GPS捕捉済";
+                document.getElementById('gps-status').className = "text-[9px] text-emerald-400 font-bold tracking-wider bg-emerald-950/40 px-3 py-1.5 rounded-full border border-emerald-500/30 backdrop-blur-sm";
+                
+                if (speed > speedLimit + 5) {
+                    showPopup(ADVICE.OVERSPEED);
+                }
+            }, (err) => {
+                console.warn("GPS error:", err);
+                document.getElementById('gps-status').innerText = "GPSエラー";
+                document.getElementById('gps-status').className = "text-[9px] text-red-400 font-bold tracking-wider bg-red-950/40 px-3 py-1.5 rounded-full border border-red-500/30 backdrop-blur-sm";
+            }, { 
+                enableHighAccuracy: true,
+                maximumAge: 1000,
+                timeout: 5000
+            });
+        }
 
-    // キャンバスサイズを実解像度に合わせる
-    els.canvas.width = els.video.clientWidth || window.innerWidth;
-    els.canvas.height = els.video.clientHeight || window.innerHeight;
-
-    await AudioController.init();
-    UIController.init(els);
-    SensorManager.init(els);
-
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
-        els.video.srcObject = stream;
-        
-        // ビデオのメタデータが読み込まれたら再度キャンバスサイズを調整
-        els.video.onloadedmetadata = () => {
-            els.canvas.width = els.video.clientWidth;
-            els.canvas.height = els.video.clientHeight;
-        };
-
-        AIEngine.init(els);
-    } catch (e) {
-        els.devStatus.innerText = "CAMERA ACCESS DENIED";
-    }
-};
-
-// 手動テストボタンの紐付け
-document.getElementById('btn-test-red').onmousedown = () => { AudioController.startRedLoop(); UIController.setRecognition('red'); };
-document.getElementById('btn-test-red').onmouseup = () => { AudioController.stopRedLoop(); UIController.setRecognition('none'); };
-document.getElementById('btn-test-blue').onmousedown = () => { AudioController.playBlue(); UIController.setRecognition('blue'); };
-document.getElementById('btn-test-blue').onmouseup = () => { UIController.setRecognition('none'); };
-</script>
-
-<style>
-@keyframes spin { to { transform: rotate(360deg); } }
-</style>
+        function startMotion() {
+            window.addEventListener('devicemotion', (event) => {
+                if (!isDriving) return;
+                
+                let acc = event.acceleration; 
+                if (!acc || acc.x === null) {
+                    acc = event.accelerationIncludingGravity;
+                }
+                if (!acc || acc.x === null) return;
+                
+                const gX = Number(acc.x) / 9.8 || 0;
+                const gY = Number(acc.y) / 9.8 || 0; 
+                
+                const ball = document.getElementById('g-ball');
+                
+                const moveX = Math.max(-32, Math.min(32, gX * 70));
+                const moveY = Math.max(-32, Math.min(32, gY * 70));
+                
+                ball.style.transform = `translate(calc(-50% + ${moveX}px), calc(-50% + ${moveY * -1}px))`;
+                
+                if (gY < -0.38) {
+                    showPopup(ADVICE.SUDDEN_BRAKE);
+                } else if (gY > 0.38) {
+                    showPopup(ADVICE.SUDDEN_START);
+                } else if (Math.abs(gX) > 0.38) {
+                    showPopup(ADVICE.SUDDEN_TURN);
+                }
+            });
+        }
+    </script>
 </body>
 </html>
