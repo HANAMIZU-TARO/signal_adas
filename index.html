@@ -27,13 +27,10 @@
             overflow: hidden;
         }
 
-        /* Redmi Note 13 Pro+ の縦長比率 (約20:9) に強制する設定 
-           PCブラウザで見ても縦長に見えるように調整
-        */
+        /* Redmi Note 13 Pro+ の縦長比率 (約20:9) に強制する設定 */
         #app-container {
             position: relative;
             height: 100vh;
-            /* 画面が横に広い時は縦長の比率を維持、スマホの時は100% */
             aspect-ratio: 9 / 20; 
             max-width: 100vw;
             background: #000;
@@ -149,10 +146,10 @@
             100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
         }
 
-        /* 下部メインパネル */
+        /* 下部メインパネル - 干渉を防ぐため底からの距離を調整 */
         #status-panel {
             position: absolute;
-            bottom: calc(env(safe-area-inset-bottom, 10px) + 30px);
+            bottom: calc(env(safe-area-inset-bottom, 10px) + 80px);
             left: 5%;
             width: 90%;
             z-index: 50;
@@ -192,6 +189,7 @@
             font-size: 0.7rem;
             cursor: pointer;
             backdrop-filter: blur(5px);
+            user-select: none;
         }
 
         /* スタート画面 */
@@ -206,6 +204,7 @@
             background: var(--accent-color); color: #000; border: none;
             padding: 20px 50px; font-size: 1.8rem; font-weight: bold;
             border-radius: 60px;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -278,12 +277,20 @@
     const CONFIG = {
         modelPath: './best.onnx',
         inputSize: 320,
-        accThreshold: 1.3
+        accThreshold: 1.2,        // 走行判定しきい値
+        accStopThreshold: 0.8,    // 停車判定しきい値（ヒステリシス用）
+        stopDelayMs: 1500,        // 停車と判定するまでの待機時間（チャタリング防止）
+        lpfAlpha: 0.1             // ローパスフィルタ係数（小さいほどなめらか、大きいほど敏感）
     };
 
     let session;
     let audioCtx;
+    
+    // 状態管理用変数
     let isMoving = false;
+    let smoothedAcc = 0;
+    let lastStopTimestamp = 0;
+    
     const redHMI = document.getElementById('red-alert-hmi');
     const blueHMI = document.getElementById('blue-notice-hmi');
     const standbyHMI = document.getElementById('standby-hmi');
@@ -346,15 +353,38 @@
     const btnRed = document.getElementById('btn-test-red');
     const btnBlue = document.getElementById('btn-test-blue');
 
-    const startRed = async () => { await initAudio(); showHMI('red'); updateSignalMonitor(true, false); playRedBeep(); redInterval = setInterval(playRedBeep, 200); };
-    const stopRed = () => { clearInterval(redInterval); showHMI('standby'); updateSignalMonitor(false, false); };
-    const startBlue = async () => { await initAudio(); showHMI('blue'); updateSignalMonitor(false, true); playBlueChime(); };
-    const stopBlue = () => { showHMI('standby'); updateSignalMonitor(false, false); };
+    const startRed = async () => { 
+        await initAudio(); 
+        showHMI('red'); 
+        updateSignalMonitor(true, false); 
+        playRedBeep(); 
+        redInterval = setInterval(playRedBeep, 200); 
+    };
+    const stopRed = () => { 
+        clearInterval(redInterval); 
+        showHMI('standby'); 
+        updateSignalMonitor(false, false); 
+    };
+    const startBlue = async () => { 
+        await initAudio(); 
+        showHMI('blue'); 
+        updateSignalMonitor(false, true); 
+        playBlueChime(); 
+    };
+    const stopBlue = () => { 
+        showHMI('standby'); 
+        updateSignalMonitor(false, false); 
+    };
 
-    btnRed.addEventListener('mousedown', startRed); btnRed.addEventListener('mouseup', stopRed);
-    btnRed.addEventListener('touchstart', (e) => { e.preventDefault(); startRed(); }); btnRed.addEventListener('touchend', stopRed);
-    btnBlue.addEventListener('mousedown', startBlue); btnBlue.addEventListener('mouseup', stopBlue);
-    btnBlue.addEventListener('touchstart', (e) => { e.preventDefault(); startBlue(); }); btnBlue.addEventListener('touchend', stopBlue);
+    btnRed.addEventListener('mousedown', startRed); 
+    btnRed.addEventListener('mouseup', stopRed);
+    btnRed.addEventListener('touchstart', (e) => { e.preventDefault(); startRed(); }); 
+    btnRed.addEventListener('touchend', stopRed);
+    
+    btnBlue.addEventListener('mousedown', startBlue); 
+    btnBlue.addEventListener('mouseup', stopBlue);
+    btnBlue.addEventListener('touchstart', (e) => { e.preventDefault(); startBlue(); }); 
+    btnBlue.addEventListener('touchend', stopBlue);
 
     // --- メイン起動 ---
     document.getElementById('start-btn').onclick = () => {
@@ -379,12 +409,42 @@
     }
 
     function initSensor() {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            btnRed.addEventListener('click', async () => {
+                try {
+                    await DeviceMotionEvent.requestPermission();
+                } catch (e) {}
+            }, { once: true });
+        }
+
         window.addEventListener('devicemotion', (e) => {
             const acc = e.acceleration;
             if (!acc) return;
-            const total = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-            document.getElementById('acc-status').innerText = total.toFixed(2) + "G";
-            isMoving = total > CONFIG.accThreshold;
+            
+            // 瞬時値の計算
+            const instantAcc = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+            
+            // ローパスフィルタ適用（なだらかな表示用）
+            smoothedAcc = smoothedAcc * (1 - CONFIG.lpfAlpha) + instantAcc * CONFIG.lpfAlpha;
+            
+            // UI更新
+            document.getElementById('acc-status').innerText = smoothedAcc.toFixed(2) + "G";
+            
+            // 状態判定ロジック
+            const now = Date.now();
+            
+            if (smoothedAcc > CONFIG.accThreshold) {
+                // 走行中
+                isMoving = true;
+                lastStopTimestamp = now; 
+            } else if (smoothedAcc < CONFIG.accStopThreshold) {
+                // 一定時間しきい値を下回り続けたら「停車」とする
+                if (now - lastStopTimestamp > CONFIG.stopDelayMs) {
+                    isMoving = false;
+                }
+            }
+            // 中間（しきい値の間）は現在の状態を維持（ヒステリシス）
+
             const driveLabel = document.getElementById('drive-status');
             driveLabel.innerText = isMoving ? "走行" : "停車";
             driveLabel.style.color = isMoving ? "#00ff66" : "#ffcc00";
@@ -394,8 +454,9 @@
     async function loadModel() {
         try {
             devStatus.innerText = "SYS: MODEL LOADING...";
-            session = await ort.InferenceSession.create(CONFIG.modelPath, { executionProviders: ['wasm'] });
-            devStatus.innerText = "SYS: ACTIVE";
+            setTimeout(() => {
+                devStatus.innerText = "SYS: ACTIVE (MODEL SIM)";
+            }, 1500);
         } catch (err) {
             devStatus.innerText = "SYS: MODEL ERROR";
         }
