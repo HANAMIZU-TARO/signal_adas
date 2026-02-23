@@ -195,7 +195,7 @@
 <body>
 
 <div id="app-container">
-    <div id="dev-status">SYS: READY | v1.0.5</div>
+    <div id="dev-status">SYS: READY | v1.0.6</div>
 
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
@@ -253,7 +253,7 @@
 
     <div id="start-overlay">
         <h1 style="color: #fff; margin-bottom: 25px; font-size: 1.8rem;">運転支援システム</h1>
-        <p style="color:#666; margin-bottom: 30px; font-size: 0.8rem;">Redmi Note 13 Pro+ 専用 v1.0.5</p>
+        <p style="color:#666; margin-bottom: 30px; font-size: 0.8rem;">Redmi Note 13 Pro+ 専用 v1.0.6</p>
         <button id="start-btn">開始</button>
     </div>
 </div>
@@ -263,12 +263,12 @@
  * --- CONFIG: 設定・パラメータ ---
  */
 const CONFIG = {
-    VERSION: "v1.0.5",
+    VERSION: "v1.0.6",
     MODEL: {
         PATH: './best.onnx',
         SIZE: 320,
-        THRESHOLD: 0.45, // 認識しきい値
-        CLASSES: ['red', 'green', 'yellow'] // モデルの出力順に合わせる
+        THRESHOLD: 0.40, // 認識しきい値（少し下げて検出しやすくしています）
+        CLASSES: ['red', 'green', 'yellow'] // モデルの出力順に合わせる（0:赤, 1:青, 2:黄 を想定）
     },
     SENSOR: {
         ACC_RUN: 1.2,
@@ -338,7 +338,7 @@ const AIEngine = {
             this.startLoop();
         } catch (e) {
             elements.devStatus.innerText = `SYS: MODEL LOAD FAILED | ${CONFIG.VERSION}`;
-            console.error(e);
+            console.error("ONNX Load Error:", e);
         }
     },
 
@@ -358,12 +358,19 @@ const AIEngine = {
                 const input = this.preprocess(imageData.data);
 
                 // 推論実行
-                const feeds = {};
-                feeds[this.session.inputNames[0]] = new ort.Tensor('float32', input, [1, 3, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE]);
-                const output = await this.session.run(feeds);
-                
-                // 後処理
-                this.postprocess(output[this.session.outputNames[0]].data);
+                if (this.session) {
+                    try {
+                        const feeds = {};
+                        feeds[this.session.inputNames[0]] = new ort.Tensor('float32', input, [1, 3, CONFIG.MODEL.SIZE, CONFIG.MODEL.SIZE]);
+                        const output = await this.session.run(feeds);
+                        
+                        // 後処理
+                        const outputTensor = output[this.session.outputNames[0]];
+                        this.postprocess(outputTensor.data, outputTensor.dims);
+                    } catch (e) {
+                        console.error("Inference Error:", e);
+                    }
+                }
             }
             requestAnimationFrame(process);
         };
@@ -380,27 +387,93 @@ const AIEngine = {
         return floatData;
     },
 
-    postprocess(data) {
-        // ※ YOLOv8/v11等の出力を想定した簡易パーサー (Shape: 1, Classes+4, Boxes)
-        // ここでは最もスコアの高い検出結果のみを抽出
+    postprocess(data, dims) {
         let bestScore = 0;
         let bestClass = -1;
-        let box = null;
+        let bestBox = null;
 
-        // 簡易デモ用のフィルタリング（実際はモデルの出力形式に合わせてループを回す）
-        // 信号機が見つかった場合、UIを更新
-        this.updateUI(bestClass, bestScore, box);
+        // 一般的なYOLOv8の出力Shapeを想定 (例: [1, 4 + classes, anchors] -> [1, 7, 8400])
+        if (dims && dims.length === 3) {
+            const numRows = dims[1];
+            const numCols = dims[2];
+
+            // 転置されている場合 (例: [1, 8400, 7]) の吸収
+            const isTransposed = numRows > numCols;
+            const anchors = isTransposed ? numRows : numCols;
+            const attributes = isTransposed ? numCols : numRows;
+
+            for (let i = 0; i < anchors; i++) {
+                let maxClassScore = 0;
+                let classId = -1;
+
+                // クラススコアを探す（インデックス4以降がクラス確率）
+                for (let c = 4; c < attributes; c++) {
+                    const score = isTransposed ? data[i * attributes + c] : data[c * anchors + i];
+                    if (score > maxClassScore) {
+                        maxClassScore = score;
+                        classId = c - 4; // 0:赤, 1:青 など
+                    }
+                }
+
+                // しきい値を超え、かつこれまでで最高のスコアだった場合
+                if (maxClassScore > CONFIG.MODEL.THRESHOLD && maxClassScore > bestScore) {
+                    bestScore = maxClassScore;
+                    bestClass = classId;
+                    
+                    // バウンディングボックスの座標 (cx, cy, w, h)
+                    const cx = isTransposed ? data[i * attributes + 0] : data[0 * anchors + i];
+                    const cy = isTransposed ? data[i * attributes + 1] : data[1 * anchors + i];
+                    const w  = isTransposed ? data[i * attributes + 2] : data[2 * anchors + i];
+                    const h  = isTransposed ? data[i * attributes + 3] : data[3 * anchors + i];
+                    
+                    bestBox = { cx, cy, w, h };
+                }
+            }
+        }
+
+        this.updateUI(bestClass, bestScore, bestBox);
     },
 
     updateUI(cls, score, box) {
         const ctx = this.elements.canvas.getContext('2d');
+        // 前回の描画をクリア
         ctx.clearRect(0, 0, this.elements.canvas.width, this.elements.canvas.height);
 
-        // UI表示ロジックとの連携
-        const state = (score > CONFIG.MODEL.THRESHOLD) ? (cls === 0 ? 'red' : 'blue') : 'none';
+        // クラス番号に応じた状態判定（0:赤, 1:青 と仮定。それ以外や閾値以下はnone）
+        const state = (score > CONFIG.MODEL.THRESHOLD) ? (cls === 0 ? 'red' : (cls === 1 ? 'blue' : 'none')) : 'none';
         
-        // 既に手動テスト等のステートがある場合は、AI優先で上書き（または論理和）
-        // ※ 現状はシンプルにAIの結果を表示
+        // デバッグ用：バウンディングボックスの描画
+        if (box && state !== 'none') {
+            // モデルの解像度(320x320)から実際の画面のキャンバス解像度へスケールを合わせる
+            const scaleX = this.elements.canvas.width / CONFIG.MODEL.SIZE;
+            const scaleY = this.elements.canvas.height / CONFIG.MODEL.SIZE;
+            
+            // cx, cy(中心座標) から左上の(x, y)座標を計算
+            const x = (box.cx - box.w / 2) * scaleX;
+            const y = (box.cy - box.h / 2) * scaleY;
+            const width = box.w * scaleX;
+            const height = box.h * scaleY;
+            
+            // 色の設定
+            const boxColor = (state === 'red') ? '#ff2222' : '#00ff66';
+            
+            ctx.strokeStyle = boxColor;
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x, y, width, height);
+            
+            // スコアとテキストの描画
+            ctx.fillStyle = boxColor;
+            ctx.font = 'bold 20px sans-serif';
+            ctx.shadowColor = "rgba(0,0,0,0.8)";
+            ctx.shadowBlur = 4;
+            const labelText = `${state === 'red' ? '赤信号' : '青信号'} ${(score * 100).toFixed(1)}%`;
+            ctx.fillText(labelText, x, y - 10);
+            
+            // シャドウリセット
+            ctx.shadowBlur = 0;
+        }
+
+        // HMI UIの更新
         UIController.setRecognition(state);
     }
 };
@@ -474,8 +547,8 @@ document.getElementById('start-btn').onclick = async () => {
     };
 
     // キャンバスサイズを実解像度に合わせる
-    els.canvas.width = els.appContainerWidth = els.video.clientWidth;
-    els.canvas.height = els.video.clientHeight;
+    els.canvas.width = els.video.clientWidth || window.innerWidth;
+    els.canvas.height = els.video.clientHeight || window.innerHeight;
 
     await AudioController.init();
     UIController.init(els);
@@ -486,6 +559,13 @@ document.getElementById('start-btn').onclick = async () => {
             video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
         });
         els.video.srcObject = stream;
+        
+        // ビデオのメタデータが読み込まれたら再度キャンバスサイズを調整
+        els.video.onloadedmetadata = () => {
+            els.canvas.width = els.video.clientWidth;
+            els.canvas.height = els.video.clientHeight;
+        };
+
         AIEngine.init(els);
     } catch (e) {
         els.devStatus.innerText = "CAMERA ACCESS DENIED";
